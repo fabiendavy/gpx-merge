@@ -1,0 +1,8 @@
+services:
+  gpx-merge:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      SITE_URL: ${SITE_URL:-}
+    restart: unless-stopped

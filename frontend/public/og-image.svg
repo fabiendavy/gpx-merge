@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="GPX Merge">
+  <rect width="1200" height="630" fill="#0f172a"/>
+  <circle cx="1080" cy="80" r="220" fill="#1e293b"/>
+  <circle cx="80" cy="560" r="180" fill="#1e293b"/>
+  <path d="M180 420c120-220 280-280 420-280s300 60 420 280" fill="none" stroke="#3b82f6" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="180" cy="420" r="16" fill="#22c55e"/>
+  <circle cx="1020" cy="420" r="16" fill="#22c55e"/>
+  <text x="80" y="170" fill="#94a3b8" font-family="system-ui, -apple-system, sans-serif" font-size="28" font-weight="600" letter-spacing="6">GPX MERGE</text>
+  <text x="80" y="250" fill="#f1f5f9" font-family="system-ui, -apple-system, sans-serif" font-size="72" font-weight="700">Merge GPX files</text>
+  <text x="80" y="320" fill="#cbd5e1" font-family="system-ui, -apple-system, sans-serif" font-size="32">Combine multiple GPX tracks into one file</text>
+</svg>

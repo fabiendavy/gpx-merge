@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="GPX Merge">
+  <rect width="32" height="32" rx="7" fill="#0f172a"/>
+  <path d="M6 21c3.2-7 8.2-9 10-9s6.8 2 10 9" fill="none" stroke="#3b82f6" stroke-width="2.4" stroke-linecap="round"/>
+  <path d="M10 12h12" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round"/>
+  <path d="M16 7v10" fill="none" stroke="#f1f5f9" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="6" cy="21" r="2.1" fill="#22c55e"/>
+  <circle cx="26" cy="21" r="2.1" fill="#22c55e"/>
+</svg>
