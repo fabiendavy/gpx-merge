@@ -54,13 +54,6 @@ body {
   margin-bottom: 1.5rem;
 }
 
-.brand {
-  color: var(--primary);
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  margin-bottom: 0.5rem;
-}
 
 h1 {
   font-size: 1.75rem;
@@ -170,6 +163,42 @@ h1 {
 .btn-merge:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.result {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.result-file {
+  pointer-events: none;
+}
+
+.ready-label {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--success);
+}
+
+.btn-download {
+  width: 100%;
+  padding: 0.9rem;
+  border: none;
+  border-radius: 8px;
+  background: var(--success);
+  color: #052e16;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.2s;
+}
+
+.btn-download:hover {
+  filter: brightness(1.08);
 }
 
 .message {

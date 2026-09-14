@@ -13,8 +13,34 @@ const PORT = process.env.PORT || 3000;
 const isDev = process.env.GPX_MERGE_DEV === "1";
 const viteDevUrl = process.env.VITE_DEV_URL ?? "http://localhost:5173";
 
+function log(
+  level: "info" | "warn" | "error",
+  message: string,
+  extra?: Record<string, unknown>
+): void {
+  const line = extra
+    ? `[${new Date().toISOString()}] ${level.toUpperCase()} ${message} ${JSON.stringify(extra)}`
+    : `[${new Date().toISOString()}] ${level.toUpperCase()} ${message}`;
+  if (level === "error") console.error(line);
+  else if (level === "warn") console.warn(line);
+  else console.log(line);
+}
+
 app.set("trust proxy", 1);
 app.use(cors());
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on("finish", () => {
+    if (req.path === "/api/health") return;
+    log("info", `${req.method} ${req.originalUrl}`, {
+      status: res.statusCode,
+      ms: Date.now() - start,
+      ip: req.ip,
+    });
+  });
+  next();
+});
 
 app.use("/api", (_req, res, next) => {
   res.setHeader("X-Robots-Tag", "noindex, nofollow");
@@ -30,8 +56,19 @@ const upload = multer({
       file.mimetype === "application/xml" ||
       file.mimetype === "text/xml" ||
       file.originalname.toLowerCase().endsWith(".gpx");
-    if (isGpx) cb(null, true);
-    else cb(new Error(`File "${file.originalname}" is not a .gpx file`));
+    if (isGpx) {
+      log("info", "accepted upload file", {
+        name: file.originalname,
+        mime: file.mimetype,
+      });
+      cb(null, true);
+      return;
+    }
+    log("warn", "rejected upload file", {
+      name: file.originalname,
+      mime: file.mimetype,
+    });
+    cb(new Error(`File "${file.originalname}" is not a .gpx file`));
   },
 });
 
@@ -40,7 +77,19 @@ app.post(
   upload.array("files", 20),
   (req, res) => {
     const files = req.files as Express.Multer.File[] | undefined;
+    log("info", "merge request received", {
+      fileCount: files?.length ?? 0,
+      files: files?.map((f) => ({
+        name: f.originalname,
+        bytes: f.size,
+        mime: f.mimetype,
+      })),
+    });
+
     if (!files || files.length < 2) {
+      log("warn", "merge rejected: need at least 2 files", {
+        fileCount: files?.length ?? 0,
+      });
       return res
         .status(400)
         .json({ error: "Please upload at least 2 GPX files to merge" });
@@ -49,9 +98,12 @@ app.post(
     try {
       const contents = files.map((f) => f.buffer.toString("utf-8"));
       const stats = getMergeStats(contents);
+      log("info", "merge stats computed", stats);
+
       const merged = mergeGpxFiles(contents);
 
       if (stats.mergedPoints === 0) {
+        log("warn", "merge produced no timestamped points", stats);
         return res.status(422).json({
           error:
             "No track points with <time> found in the uploaded files. All points were ignored.",
@@ -64,9 +116,16 @@ app.post(
         'attachment; filename="merged.gpx"'
       );
       res.setHeader("X-Merge-Stats", JSON.stringify(stats));
+      log("info", "merge succeeded", {
+        ...stats,
+        outputBytes: Buffer.byteLength(merged),
+      });
       return res.send(merged);
     } catch (err) {
-      console.error("Merge error:", err);
+      log("error", "merge failed", {
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
       return res.status(500).json({ error: "Failed to merge GPX files" });
     }
   }
@@ -136,6 +195,7 @@ app.get("/sitemap.xml", (req, res) => {
 
 async function setupFrontend(): Promise<void> {
   if (isDev) {
+    log("info", "frontend proxy enabled", { target: viteDevUrl });
     const { createProxyMiddleware } = await import("http-proxy-middleware");
     app.use(
       createProxyMiddleware({
@@ -149,6 +209,7 @@ async function setupFrontend(): Promise<void> {
 
   const staticDir = path.resolve(__dirname, "../../frontend/dist");
   if (fs.existsSync(staticDir)) {
+    log("info", "serving frontend static files", { staticDir });
     app.use(express.static(staticDir, { index: false }));
     app.get("*", (req, res) => {
       const indexPath = path.join(staticDir, "index.html");
@@ -158,24 +219,86 @@ async function setupFrontend(): Promise<void> {
         .set("Cache-Control", "public, max-age=300")
         .send(applySiteOrigin(html, resolveSiteOrigin(req)));
     });
+    return;
   }
+
+  log("warn", "frontend dist not found; UI will not be served", { staticDir });
+}
+
+function registerErrorHandler(): void {
+  app.use(
+    (
+      err: unknown,
+      req: express.Request,
+      res: express.Response,
+      next: express.NextFunction
+    ) => {
+      if (res.headersSent) {
+        next(err);
+        return;
+      }
+
+      if (err instanceof multer.MulterError) {
+        log("error", "upload error", {
+          code: err.code,
+          message: err.message,
+          path: req.path,
+        });
+        res.status(400).json({ error: err.message });
+        return;
+      }
+
+      if (err instanceof Error) {
+        log("error", "request error", {
+          message: err.message,
+          path: req.path,
+        });
+        res.status(400).json({ error: err.message });
+        return;
+      }
+
+      log("error", "unknown request error", { path: req.path });
+      res.status(500).json({ error: "Internal server error" });
+    }
+  );
 }
 
 async function main(): Promise<void> {
-  await setupFrontend();
+  const staticDir = path.resolve(__dirname, "../../frontend/dist");
+  log("info", "starting gpx-merge", {
+    port: PORT,
+    mode: isDev ? "dev" : "production",
+    nodeEnv: process.env.NODE_ENV ?? "",
+    siteUrl: process.env.SITE_URL ?? "",
+    frontendDistExists: fs.existsSync(staticDir),
+  });
 
-  app.listen(Number(PORT), () => {
-    const mode = isDev ? "dev (live reload)" : "production";
-    console.log(
-      `gpx-merge server running on http://localhost:${PORT} [${mode}]`
-    );
+  await setupFrontend();
+  registerErrorHandler();
+
+  const server = app.listen(Number(PORT), "0.0.0.0", () => {
+    const addr = server.address();
+    log("info", "server listening", {
+      address: addr && typeof addr === "object" ? `${addr.address}:${addr.port}` : String(addr),
+    });
     if (isDev) {
-      console.log(`Frontend proxied from ${viteDevUrl} — edit files to see changes instantly`);
+      log("info", "edit files to see changes instantly", { viteDevUrl });
     }
+  });
+
+  server.on("error", (err) => {
+    log("error", "server listen error", {
+      error: err.message,
+      stack: err.stack,
+    });
+    process.exit(1);
   });
 }
 
 main().catch((err) => {
-  console.error("Failed to start server:", err);
+  log("error", "failed to start server", {
+    error: err instanceof Error ? err.message : String(err),
+    stack: err instanceof Error ? err.stack : undefined,
+  });
   process.exit(1);
 });

@@ -7,8 +7,15 @@ interface SelectedFile {
 
 const app = document.getElementById("app")!;
 
+interface MergeResult {
+  url: string;
+  fileName: string;
+  statsText: string;
+}
+
 let selectedFiles: SelectedFile[] = [];
 let isMerging = false;
+let mergeResult: MergeResult | null = null;
 
 function render(): void {
   setupDropzone();
@@ -81,29 +88,59 @@ function renderFileList(): void {
   });
 }
 
+function clearMergeResult(): void {
+  if (mergeResult) {
+    URL.revokeObjectURL(mergeResult.url);
+    mergeResult = null;
+  }
+}
+
+function downloadMergeResult(): void {
+  if (!mergeResult) return;
+  const a = document.createElement("a");
+  a.href = mergeResult.url;
+  a.download = mergeResult.fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 function renderActions(): void {
   const actions = document.getElementById("actions")!;
   const canMerge = selectedFiles.length >= 2 && !isMerging;
+
+  const resultHtml = mergeResult
+    ? `
+      <div class="result" id="messageArea">
+        <div class="message success">${mergeResult.statsText}</div>
+        <div class="file-item result-file">
+          <span class="name">${mergeResult.fileName}</span>
+          <span class="ready-label">Ready</span>
+        </div>
+        <button type="button" class="btn-download" id="downloadBtn">
+          Download ${mergeResult.fileName}
+        </button>
+      </div>
+    `
+    : `<div id="messageArea"></div>`;
 
   actions.innerHTML = `
     <button class="btn-merge" id="mergeBtn" ${canMerge ? "" : "disabled"}>
       ${isMerging ? "Merging..." : "Merge GPX files"}
     </button>
-    <div id="messageArea"></div>
+    ${resultHtml}
   `;
 
-  const mergeBtn = document.getElementById("mergeBtn")!;
-  mergeBtn.addEventListener("click", handleMerge);
+  document.getElementById("mergeBtn")!.addEventListener("click", handleMerge);
+  document.getElementById("downloadBtn")?.addEventListener("click", downloadMergeResult);
 }
 
 async function handleMerge(): Promise<void> {
   if (selectedFiles.length < 2 || isMerging) return;
 
   isMerging = true;
+  clearMergeResult();
   renderActions();
-
-  const messageArea = document.getElementById("messageArea")!;
-  messageArea.innerHTML = "";
 
   const formData = new FormData();
   for (const f of selectedFiles) {
@@ -119,34 +156,33 @@ async function handleMerge(): Promise<void> {
     }
 
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "merged.gpx";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-
     const statsHeader = res.headers.get("X-Merge-Stats");
-    let statsText = "Merge complete! Downloading merged.gpx";
+    let statsText = "Merge complete. Your file is ready to download.";
     if (statsHeader) {
       try {
         const stats = JSON.parse(statsHeader);
-        statsText = `Merge complete! Downloading merged.gpx — ${stats.mergedPoints} points merged, ${stats.ignoredPoints} without timestamp ignored.`;
+        statsText = `Merge complete — ${stats.mergedPoints} points merged, ${stats.ignoredPoints} without timestamp ignored.`;
       } catch {
         /* ignore */
       }
     }
 
-    messageArea.innerHTML = `<div class="message success">${statsText}</div>`;
+    mergeResult = {
+      url: URL.createObjectURL(blob),
+      fileName: "merged.gpx",
+      statsText,
+    };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    messageArea.innerHTML = `<div class="message error">${msg}</div>`;
-  } finally {
     isMerging = false;
     renderActions();
+    const messageArea = document.getElementById("messageArea")!;
+    messageArea.innerHTML = `<div class="message error">${msg}</div>`;
+    return;
   }
+
+  isMerging = false;
+  renderActions();
 }
 
 render();
