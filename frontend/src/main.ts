@@ -10,6 +10,7 @@ const app = document.getElementById("app")!;
 interface MergeResult {
   url: string;
   fileName: string;
+  fileSize: number;
   statsText: string;
 }
 
@@ -114,7 +115,7 @@ function renderActions(): void {
       <div class="result" id="messageArea">
         <div class="message success">${mergeResult.statsText}</div>
         <div class="file-item result-file">
-          <span class="name">${mergeResult.fileName}</span>
+          <span class="name">${mergeResult.fileName} (${mergeResult.fileSize.toFixed(2)} MB)</span>
           <span class="ready-label">Ready</span>
         </div>
         <button type="button" class="btn-download" id="downloadBtn">
@@ -169,7 +170,8 @@ async function handleMerge(): Promise<void> {
 
     mergeResult = {
       url: URL.createObjectURL(blob),
-      fileName: "merged.gpx",
+      fileName: 'merged.gpx',
+      fileSize: blob.size / (1024 * 1024),
       statsText,
     };
   } catch (err) {

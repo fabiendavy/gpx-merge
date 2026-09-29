@@ -13,13 +13,22 @@ function siteOriginPlugin(): Plugin {
   };
 }
 
+const usePolling = process.env.CHOKIDAR_USEPOLLING === "true";
+
 export default defineConfig({
   plugins: [siteOriginPlugin()],
   server: {
+    host: true,
     port: 5173,
     proxy: {
-      "/api": "http://localhost:3000",
+      "/api": "http://127.0.0.1:3000",
     },
+    watch: usePolling
+      ? {
+          usePolling: true,
+          interval: Number(process.env.CHOKIDAR_INTERVAL ?? 300),
+        }
+      : undefined,
   },
   build: {
     outDir: "dist",

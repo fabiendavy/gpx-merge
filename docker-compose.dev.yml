@@ -1,0 +1,19 @@
+services:
+  gpx-merge:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "3000:3000"
+    environment:
+      GPX_MERGE_DEV: "1"
+      VITE_DEV_URL: http://127.0.0.1:5173
+      CHOKIDAR_USEPOLLING: "true"
+      CHOKIDAR_INTERVAL: "300"
+      SITE_URL: ${SITE_URL:-}
+    volumes:
+      - ./backend/src:/app/backend/src
+      - ./frontend/src:/app/frontend/src
+      - ./frontend/index.html:/app/frontend/index.html
+      - ./frontend/public:/app/frontend/public
+      - ./frontend/vite.config.ts:/app/frontend/vite.config.ts

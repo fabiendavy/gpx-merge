@@ -3,8 +3,10 @@ import multer from "multer";
 import cors from "cors";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
+import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { mergeGpxFiles, getMergeStats } from "./gpxMerge.js";
+import { mergeGpxPaths } from "./gpxMerge.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -12,6 +14,30 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const isDev = process.env.GPX_MERGE_DEV === "1";
 const viteDevUrl = process.env.VITE_DEV_URL ?? "http://localhost:5173";
+const fileSizeLimit = 50 * 1024 * 1024;
+const maxTotalBytes = 150 * 1024 * 1024;
+const uploadDir = path.join(os.tmpdir(), "gpx-merge-uploads");
+fs.mkdirSync(uploadDir, { recursive: true });
+
+function uploadedFiles(
+  files: Express.Multer.File[] | { [fieldname: string]: Express.Multer.File[] } | undefined
+): Express.Multer.File[] {
+  return Array.isArray(files) ? files : [];
+}
+
+function cleanupUploads(files: Express.Multer.File[]): void {
+  for (const file of files) {
+    if (!file.path) continue;
+    fs.unlink(file.path, (err) => {
+      if (err && (err as NodeJS.ErrnoException).code !== "ENOENT") {
+        log("warn", "failed to delete upload", {
+          path: file.path,
+          error: err.message,
+        });
+      }
+    });
+  }
+}
 
 function log(
   level: "info" | "warn" | "error",
@@ -48,8 +74,13 @@ app.use("/api", (_req, res, next) => {
 });
 
 const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 50 * 1024 * 1024 },
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadDir),
+    filename: (_req, _file, cb) => {
+      cb(null, `${Date.now()}-${crypto.randomBytes(8).toString("hex")}.gpx`);
+    },
+  }),
+  limits: { fileSize: fileSizeLimit },
   fileFilter: (_req, file, cb) => {
     const isGpx =
       file.mimetype === "application/gpx+xml" ||
@@ -76,34 +107,50 @@ app.post(
   "/api/merge",
   upload.array("files", 20),
   (req, res) => {
-    const files = req.files as Express.Multer.File[] | undefined;
+    const files = uploadedFiles(req.files);
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      cleanupUploads(files);
+    };
+    res.once("finish", cleanup);
+    res.once("close", cleanup);
+
+    req.setTimeout(10 * 60 * 1000);
+    res.setTimeout(10 * 60 * 1000);
+
     log("info", "merge request received", {
-      fileCount: files?.length ?? 0,
-      files: files?.map((f) => ({
+      fileCount: files.length,
+      files: files.map((f) => ({
         name: f.originalname,
         bytes: f.size,
         mime: f.mimetype,
       })),
     });
 
-    if (!files || files.length < 2) {
+    if (files.length < 2) {
       log("warn", "merge rejected: need at least 2 files", {
-        fileCount: files?.length ?? 0,
+        fileCount: files.length,
       });
       return res
         .status(400)
         .json({ error: "Please upload at least 2 GPX files to merge" });
     }
 
-    try {
-      const contents = files.map((f) => f.buffer.toString("utf-8"));
-      const stats = getMergeStats(contents);
-      log("info", "merge stats computed", stats);
+    const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > maxTotalBytes) {
+      log("warn", "merge rejected: total upload too large", { totalBytes });
+      return res.status(413).json({
+        error: "Uploaded files are too large. Maximum total size is 150 MB.",
+      });
+    }
 
-      const merged = mergeGpxFiles(contents);
+    try {
+      const { xml, stats } = mergeGpxPaths(files.map((f) => f.path));
 
       if (stats.mergedPoints === 0) {
-        log("warn", "merge produced no timestamped points", stats);
+        log("warn", "merge produced no timestamped points", { ...stats });
         return res.status(422).json({
           error:
             "No track points with <time> found in the uploaded files. All points were ignored.",
@@ -118,9 +165,10 @@ app.post(
       res.setHeader("X-Merge-Stats", JSON.stringify(stats));
       log("info", "merge succeeded", {
         ...stats,
-        outputBytes: Buffer.byteLength(merged),
+        outputBytes: Buffer.byteLength(xml),
+        heapUsedMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       });
-      return res.send(merged);
+      return res.send(xml);
     } catch (err) {
       log("error", "merge failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -238,6 +286,8 @@ function registerErrorHandler(): void {
         return;
       }
 
+      cleanupUploads(uploadedFiles(req.files));
+
       if (err instanceof multer.MulterError) {
         log("error", "upload error", {
           code: err.code,
@@ -285,6 +335,9 @@ async function main(): Promise<void> {
       log("info", "edit files to see changes instantly", { viteDevUrl });
     }
   });
+  server.timeout = 10 * 60 * 1000;
+  server.requestTimeout = 10 * 60 * 1000;
+  server.headersTimeout = 10 * 60 * 1000 + 1000;
 
   server.on("error", (err) => {
     log("error", "server listen error", {
